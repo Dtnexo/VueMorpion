@@ -22,10 +22,6 @@ import { RouterView, RouterLink } from 'vue-router'
       </transition>
     </router-view>
   </main>
-
-  <footer class="main-footer">
-    <p>© Portes Ouvertes ETML - Projet Étudiant</p>
-  </footer>
 </template>
 
 <style>

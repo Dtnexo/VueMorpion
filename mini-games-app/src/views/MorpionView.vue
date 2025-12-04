@@ -1,52 +1,126 @@
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { useLeaderboard } from '../composables/useLeaderboard'
+
+const { addScore } = useLeaderboard('morpion')
 
 // --- ÉTAT DU JEU ---
-const gameStarted = ref(false)
+const gameStatus = ref('config')
 const board = ref(Array(9).fill(null))
-const currentPlayerInternal = ref('X')
-const winnerInternal = ref(null)
-const winningLine = ref([]) // Pour stocker les indices de la ligne gagnante
-const scores = reactive({ p1: 0, p2: 0, draw: 0 })
+// Lecture automatique du pseudo
+const playerPseudo = localStorage.getItem('playerPseudo') || 'Joueur'
+const difficulty = ref('medium')
+const currentPlayer = ref('X')
+const winner = ref(null)
+const winningLine = ref([])
+const aiThinking = ref(false)
 
-// --- CONFIGURATION ---
-const p1Config = reactive({ name: 'Visiteur', symbol: '❌' })
-const p2Config = reactive({ name: 'Élève ETML', symbol: '⭕️' })
-const suggestedSymbols = ['❌', '⭕️', '💻', '⚙️', '🎓', '🚀', '⚡', '🤖', '📐', '🧠']
-
-// --- COMPUTED ---
-const currentPlayerDisplay = computed(() => {
-  return currentPlayerInternal.value === 'X' ? p1Config : p2Config
-})
-
-const winnerName = computed(() => {
-  if (winnerInternal.value === 'X') return p1Config.name
-  if (winnerInternal.value === 'O') return p2Config.name
-  return null
-})
-
-// --- FONCTIONS ---
 const startGame = () => {
-  if (!p1Config.name.trim()) p1Config.name = 'Joueur 1'
-  if (!p2Config.name.trim()) p2Config.name = 'Joueur 2'
-  gameStarted.value = true
+  gameStatus.value = 'playing'
   resetBoard()
 }
 
+// ... (Reste de la logique de jeu identique : makeMove, makeAiMove, checkWin, etc.) ...
+// Pour gagner de la place, je garde la logique IA identique à la version précédente
 const makeMove = (index) => {
-  if (board.value[index] || winnerInternal.value) return
-  board.value[index] = currentPlayerInternal.value
-  checkWinner()
-  if (!winnerInternal.value) {
-    currentPlayerInternal.value = currentPlayerInternal.value === 'X' ? 'O' : 'X'
+  if (board.value[index] || winner.value || aiThinking.value) return
+  board.value[index] = 'X'
+  if (checkWin('X')) {
+    endGame('X')
+  } else if (!board.value.includes(null)) {
+    endGame('draw')
+  } else {
+    currentPlayer.value = 'O'
+    aiThinking.value = true
+    setTimeout(makeAiMove, 500)
   }
 }
 
-const getSymbolForCell = (cellValue) => {
-  if (cellValue === 'X') return p1Config.symbol
-  if (cellValue === 'O') return p2Config.symbol
-  return null
+const makeAiMove = () => {
+  let moveIndex = -1
+  if (difficulty.value === 'easy') moveIndex = getRandomMove()
+  else if (difficulty.value === 'medium') moveIndex = findBestMove(false)
+  else moveIndex = getMinimaxMove()
+
+  if (moveIndex !== -1) {
+    board.value[moveIndex] = 'O'
+    if (checkWin('O')) endGame('O')
+    else if (!board.value.includes(null)) endGame('draw')
+  }
+  currentPlayer.value = 'X'
+  aiThinking.value = false
+}
+
+// IA Logic helpers
+const getRandomMove = () => {
+  const available = board.value.map((v, i) => (v === null ? i : null)).filter((v) => v !== null)
+  return available[Math.floor(Math.random() * available.length)]
+}
+const findBestMove = (useMinimax) => {
+  for (let i = 0; i < 9; i++) {
+    if (!board.value[i]) {
+      board.value[i] = 'O'
+      if (checkWin('O')) {
+        board.value[i] = null
+        return i
+      }
+      board.value[i] = null
+    }
+  }
+  for (let i = 0; i < 9; i++) {
+    if (!board.value[i]) {
+      board.value[i] = 'X'
+      if (checkWin('X')) {
+        board.value[i] = null
+        return i
+      }
+      board.value[i] = null
+    }
+  }
+  return getRandomMove()
+}
+const getMinimaxMove = () => {
+  let bestScore = -Infinity
+  let move = -1
+  for (let i = 0; i < 9; i++) {
+    if (board.value[i] === null) {
+      board.value[i] = 'O'
+      let score = minimax(board.value, 0, false)
+      board.value[i] = null
+      if (score > bestScore) {
+        bestScore = score
+        move = i
+      }
+    }
+  }
+  return move
+}
+const minimax = (currentBoard, depth, isMaximizing) => {
+  if (checkWin('O')) return 10 - depth
+  if (checkWin('X')) return -10 + depth
+  if (!currentBoard.includes(null)) return 0
+  if (isMaximizing) {
+    let bestScore = -Infinity
+    for (let i = 0; i < 9; i++) {
+      if (currentBoard[i] === null) {
+        currentBoard[i] = 'O'
+        bestScore = Math.max(minimax(currentBoard, depth + 1, false), bestScore)
+        currentBoard[i] = null
+      }
+    }
+    return bestScore
+  } else {
+    let bestScore = Infinity
+    for (let i = 0; i < 9; i++) {
+      if (currentBoard[i] === null) {
+        currentBoard[i] = 'X'
+        bestScore = Math.min(minimax(currentBoard, depth + 1, true), bestScore)
+        currentBoard[i] = null
+      }
+    }
+    return bestScore
+  }
 }
 
 const winPatterns = [
@@ -59,238 +133,230 @@ const winPatterns = [
   [0, 4, 8],
   [2, 4, 6],
 ]
-
-const checkWinner = () => {
-  for (const pattern of winPatterns) {
-    const [a, b, c] = pattern
-    if (board.value[a] && board.value[a] === board.value[b] && board.value[a] === board.value[c]) {
-      winnerInternal.value = board.value[a]
-      winningLine.value = pattern // On stocke la ligne gagnante
-
-      // Mise à jour des scores
-      if (board.value[a] === 'X') scores.p1++
-      else scores.p2++
-      return
+const checkWin = (player) => {
+  return winPatterns.some((pattern) => {
+    if (pattern.every((index) => board.value[index] === player)) {
+      if (gameStatus.value === 'playing' && !aiThinking.value && currentPlayer.value === player)
+        winningLine.value = pattern
+      return true
     }
-  }
-  if (!board.value.includes(null)) {
-    winnerInternal.value = 'Égalité'
-    scores.draw++
-  }
+    return false
+  })
 }
 
+const endGame = async (result) => {
+  winner.value = result
+  gameStatus.value = 'finished'
+  if (result === 'X') {
+    let points = 50
+    if (difficulty.value === 'medium') points = 100
+    if (difficulty.value === 'hard') points = 200
+    await addScore(playerPseudo, points, { difficulty: difficulty.value })
+  }
+}
 const resetBoard = () => {
   board.value = Array(9).fill(null)
-  currentPlayerInternal.value = 'X'
-  winnerInternal.value = null
+  currentPlayer.value = 'X'
+  winner.value = null
   winningLine.value = []
-}
-
-const backToSetup = () => {
-  gameStarted.value = false
-  resetBoard()
-  scores.p1 = 0
-  scores.p2 = 0
-  scores.draw = 0
 }
 </script>
 
 <template>
   <div class="morpion-container">
     <div class="brand-header">
-      <div class="logo-text">ETML <span class="subtitle">ARCADE</span></div>
+      <div class="logo-text">ETML <span class="subtitle">MORPION</span></div>
     </div>
 
-    <!-- CONFIGURATION -->
+    <!-- CONFIG (Plus d'input pseudo) -->
     <transition name="fade" mode="out-in">
-      <div v-if="!gameStarted" class="card setup-card" key="setup">
-        <h1>Morpion</h1>
-        <p class="intro-text">Qui affrontez-vous ?</p>
+      <div v-if="gameStatus === 'config'" class="card config-card" key="config">
+        <h1>
+          Bonjour, <span class="pseudo-display">{{ playerPseudo }}</span>
+        </h1>
+        <p class="subtitle-config">Prêt à affronter l'IA ?</p>
 
-        <div class="players-grid">
-          <div class="player-input-group">
-            <div class="player-label" style="color: var(--etml-blue)">Joueur 1</div>
-            <input v-model="p1Config.name" type="text" placeholder="Nom" />
-            <select v-model="p1Config.symbol">
-              <option v-for="s in suggestedSymbols" :key="s" :value="s">{{ s }}</option>
-            </select>
-          </div>
-          <div class="versus-icon">VS</div>
-          <div class="player-input-group">
-            <div class="player-label" style="color: var(--etml-red)">Joueur 2</div>
-            <input v-model="p2Config.name" type="text" placeholder="Nom" />
-            <select v-model="p2Config.symbol">
-              <option
-                v-for="s in suggestedSymbols.filter((sym) => sym !== p1Config.symbol)"
-                :key="s"
-                :value="s"
-              >
-                {{ s }}
-              </option>
-            </select>
-          </div>
+        <p class="label-diff">Choisis ta difficulté :</p>
+        <div class="diff-select">
+          <button @click="difficulty = 'easy'" :class="{ active: difficulty === 'easy' }">
+            Facile
+          </button>
+          <button @click="difficulty = 'medium'" :class="{ active: difficulty === 'medium' }">
+            Moyen
+          </button>
+          <button @click="difficulty = 'hard'" :class="{ active: difficulty === 'hard' }">
+            Impossible
+          </button>
         </div>
-        <button class="etml-btn start-btn" @click="startGame">Lancer le duel</button>
+        <button class="etml-btn start-btn" @click="startGame">LANCER LE MATCH</button>
       </div>
 
       <!-- JEU -->
       <div v-else class="card game-card" key="game">
-        <!-- Tableau des scores -->
-        <div class="scoreboard">
-          <div class="score-pill p1">{{ p1Config.name }}: {{ scores.p1 }}</div>
-          <div class="score-pill draw">Nul: {{ scores.draw }}</div>
-          <div class="score-pill p2">{{ p2Config.name }}: {{ scores.p2 }}</div>
+        <div class="hud">
+          <div class="player p1 active">👤 {{ playerPseudo }} (X)</div>
+          <div class="vs">VS</div>
+          <div class="player p2" :class="{ thinking: aiThinking }">🤖 IA (O)</div>
         </div>
 
-        <div class="game-header">
-          <div class="turn-indicator" :class="{ 'turn-p2': currentPlayerInternal === 'O' }">
-            Tour : <strong>{{ currentPlayerDisplay.name }}</strong>
-          </div>
-        </div>
-
-        <div class="board" :class="{ 'game-over': winnerInternal }">
+        <div class="board" :class="{ 'game-over': winner }">
           <div
-            v-for="(cellInternalValue, index) in board"
-            :key="index"
+            v-for="(cell, i) in board"
+            :key="i"
             class="cell"
-            :class="{
-              taken: cellInternalValue,
-              'winning-cell': winningLine.includes(index),
-            }"
-            @click="makeMove(index)"
+            :class="{ taken: cell, winner: winningLine.includes(i) }"
+            @click="makeMove(i)"
           >
-            <transition name="pop">
-              <span v-if="cellInternalValue" class="cell-symbol">{{
-                getSymbolForCell(cellInternalValue)
-              }}</span>
-            </transition>
+            <span v-if="cell">{{ cell === 'X' ? '❌' : '⭕' }}</span>
           </div>
         </div>
 
-        <!-- Overlay Résultats -->
-        <transition name="fade">
-          <div v-if="winnerInternal" class="result-overlay">
-            <div class="result-box">
-              <h2 v-if="winnerInternal === 'Égalité'">🤝 Égalité</h2>
-              <h2 v-else>🏆 {{ winnerName }} gagne !</h2>
+        <button @click="gameStatus = 'config'" class="etml-btn secondary">Abandonner</button>
 
-              <div class="actions">
-                <button @click="resetBoard" class="etml-btn">Revanche</button>
-                <button @click="backToSetup" class="etml-btn secondary">Quitter</button>
-              </div>
+        <div v-if="winner" class="overlay">
+          <div class="modal">
+            <h2 v-if="winner === 'X'">🎉 Gagné !</h2>
+            <h2 v-else-if="winner === 'O'">💀 Perdu...</h2>
+            <h2 v-else>🤝 Égalité</h2>
+            <div class="actions">
+              <button @click="startGame" class="etml-btn">Rejouer</button>
+              <RouterLink to="/leaderboard" class="etml-btn outline">Classement</RouterLink>
             </div>
           </div>
-        </transition>
+        </div>
       </div>
     </transition>
 
-    <RouterLink to="/" class="back-link">Retour Menu</RouterLink>
+    <RouterLink to="/games" class="back-link">Retour Menu</RouterLink>
   </div>
 </template>
 
 <style scoped>
-/* COULEURS ETML */
-:root {
-  --etml-blue: #005596;
-  --etml-red: #e63946;
-}
 .morpion-container {
   text-align: center;
   max-width: 500px;
-  width: 100%;
+  margin: 0 auto;
+  font-family: sans-serif;
+  padding: 20px;
 }
-
 .card {
   background: white;
   padding: 30px;
-  border-radius: 12px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
 }
-
-/* Scoreboard */
-.scoreboard {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 20px;
-  font-size: 0.9rem;
+.pseudo-display {
+  color: #005596;
   font-weight: bold;
 }
-.score-pill {
-  background: #eee;
-  padding: 5px 10px;
-  border-radius: 20px;
+.subtitle-config {
+  color: #666;
+  margin-bottom: 20px;
 }
-.score-pill.p1 {
-  color: var(--etml-blue);
-  background: #e3f2fd;
+.label-diff {
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: #333;
 }
-.score-pill.p2 {
-  color: var(--etml-red);
-  background: #ffebee;
-}
-
-/* Config Inputs */
-.players-grid {
+.diff-select {
   display: flex;
   gap: 10px;
   margin-bottom: 20px;
-  align-items: center;
 }
-.player-input-group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  width: 45%;
+.diff-select button {
+  flex: 1;
+  padding: 12px;
+  border: 2px solid #eee;
+  background: #fff;
+  cursor: pointer;
+  border-radius: 10px;
+  font-weight: 600;
+  transition: all 0.2s;
 }
-input,
-select {
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+.diff-select button:hover {
+  border-color: #005596;
+}
+.diff-select button.active {
+  background: #005596;
+  color: white;
+  border-color: #005596;
+  box-shadow: 0 4px 10px rgba(0, 85, 150, 0.2);
+}
+.etml-btn {
   width: 100%;
+  padding: 12px;
+  background: #005596;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  font-size: 1rem;
 }
-
-/* Jeu */
-.turn-indicator {
-  padding: 8px 20px;
-  background: #f0f7ff;
-  color: var(--etml-blue);
-  border-radius: 50px;
-  display: inline-block;
-  margin-bottom: 15px;
+.etml-btn.secondary {
+  background: transparent;
+  color: #005596;
+  border: 2px solid #005596;
+  margin-top: 15px;
 }
-.turn-indicator.turn-p2 {
-  background: #fff0f0;
-  color: var(--etml-red);
+.etml-btn.outline {
+  background: transparent;
+  border: 1px solid #005596;
+  color: #005596;
+  margin-top: 5px;
 }
-
 .board {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  background: #eee;
-  padding: 8px;
-  border-radius: 10px;
+  gap: 10px;
+  margin: 20px 0;
 }
 .cell {
-  background: white;
-  aspect-ratio: 1;
+  background: #f4f6f8;
+  height: 100px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 3rem;
-  border-radius: 6px;
+  border-radius: 15px;
   cursor: pointer;
-  position: relative;
+  transition: background 0.2s;
 }
-.cell.taken {
-  cursor: default;
-}
-
-/* Animation Ligne Gagnante */
-.cell.winning-cell {
-  background-color: #d4edda;
+.cell.winner {
+  background: #d4edda;
   animation: pulse 1s infinite;
+}
+.hud {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  font-weight: bold;
+  color: #333;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  background: white;
+  padding: 30px;
+  border-radius: 20px;
+  text-align: center;
+  min-width: 250px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+.back-link {
+  display: inline-block;
+  margin-top: 20px;
+  color: #888;
+  text-decoration: none;
+  font-weight: 600;
 }
 @keyframes pulse {
   0% {
@@ -299,46 +365,5 @@ select {
   50% {
     transform: scale(1.05);
   }
-  100% {
-    transform: scale(1);
-  }
-}
-
-/* Boutons */
-.etml-btn {
-  background: var(--etml-blue);
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  width: 100%;
-  font-size: 1rem;
-}
-.etml-btn.secondary {
-  background: transparent;
-  border: 2px solid var(--etml-blue);
-  color: var(--etml-blue);
-  margin-top: 10px;
-}
-
-/* Overlay */
-.result-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-}
-.back-link {
-  display: block;
-  margin-top: 20px;
-  color: #666;
-  text-decoration: none;
 }
 </style>
